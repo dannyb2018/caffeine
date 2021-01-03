@@ -351,7 +351,18 @@ public final class RefreshAfterWriteTest {
     cache.invalidate(key);
     refresh.set(true);
 
-    await().until(() -> cache.getIfPresent(key), is(refreshed));
+    var executor = (TrackingExecutor) context.executor();
+    await().until(() -> executor.submitted() == executor.completed());
+
+    if (context.implementation() == Implementation.Guava) {
+      // Guava does not protect against ABA when the entry was removed by allowing a possibly
+      // stale value from being inserted.
+      assertThat(cache.getIfPresent(key), is(refreshed));
+    } else {
+      // Maintain linearizability by discarding the refresh if completing after an explicit removal
+      assertThat(cache.getIfPresent(key), is(nullValue()));
+    }
+
     await().until(() -> cache, hasRemovalNotifications(context, 1, RemovalCause.EXPLICIT));
     assertThat(context, both(hasLoadSuccessCount(1)).and(hasLoadFailureCount(0)));
   }
